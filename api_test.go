@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -706,5 +707,77 @@ func TestWrapMCPEndpointWithValidToken(t *testing.T) {
 	}
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rec.Code)
+	}
+}
+
+// TestTokenExpiryBuffer tests that the cache TTL is derived from the JWT exp claim.
+func TestTokenExpiryBuffer(t *testing.T) {
+	tests := []struct {
+		name              string
+		expirationFromNow time.Duration
+		tokenExpiryBuffer time.Duration
+		want              *User
+		wantErr           string
+	}{
+		{
+			name:              "success",
+			expirationFromNow: time.Minute,
+			want:              &User{Subject: "testuser"},
+		},
+		{
+			name:              "expired token",
+			expirationFromNow: -time.Minute,
+			wantErr:           "authentication failed: failed to parse and validate token: token has invalid claims: token is expired",
+		},
+		{
+			name:              "token expires in buffer",
+			tokenExpiryBuffer: 5 * time.Minute,
+			expirationFromNow: time.Minute,
+			wantErr:           "authentication failed: token expired or expiring too soon",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Mode:              "native",
+				Provider:          "hmac",
+				Audience:          "api://test",
+				JWTSecret:         []byte("test-secret-key-must-be-32-bytes-long!"),
+				ServerURL:         "https://test-server.com",
+				Issuer:            "https://test.example.com",
+				TokenExpiryBuffer: tt.tokenExpiryBuffer,
+			}
+			srv, err := NewServer(cfg)
+			if err != nil {
+				t.Fatalf("NewServer: %v", err)
+			}
+
+			// Create a valid HMAC token
+			token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+				"sub": "testuser",
+				"aud": "api://test",
+				"iss": "https://test.example.com",
+				"exp": time.Now().Add(tt.expirationFromNow).Unix(),
+			})
+			tokenString, _ := token.SignedString(cfg.JWTSecret)
+
+			user, err := srv.ValidateTokenCached(context.Background(), tokenString)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("expected error containing %q, got %q", tt.wantErr, err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+			if !reflect.DeepEqual(user, tt.want) {
+				t.Errorf("expected user %v got user %v", tt.want, user)
+			}
+		})
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tuannvm/oauth-mcp-proxy/provider"
 )
@@ -41,6 +42,11 @@ type Config struct {
 	// The issuer URL to use for issuer validation.
 	// This should only be set if the issuer in the token differs from the standard issuer URL.
 	ValidatorIssuer string
+
+	// TokenExpiryBuffer is subtracted from the JWT's exp claim to determine
+	// effective cache expiry. Tokens with less than this duration remaining
+	// are treated as expired and rejected. Defaults to 0 (no buffer).
+	TokenExpiryBuffer time.Duration
 }
 
 // Validate validates the configuration
@@ -262,6 +268,13 @@ func (b *ConfigBuilder) WithSkipAudienceCheck(skipAudienceCheck bool) *ConfigBui
 // WithValidatorIssuer sets the validator issuer URL
 func (b *ConfigBuilder) WithValidatorIssuer(validatorIssuer string) *ConfigBuilder {
 	b.config.ValidatorIssuer = validatorIssuer
+	return b
+}
+
+// WithTokenExpiryBuffer sets the buffer subtracted from JWT exp for cache expiry.
+// Tokens with less than d remaining until expiry are treated as expired and rejected.
+func (b *ConfigBuilder) WithTokenExpiryBuffer(d time.Duration) *ConfigBuilder {
+	b.config.TokenExpiryBuffer = d
 	return b
 }
 
